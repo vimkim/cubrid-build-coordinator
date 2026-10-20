@@ -5,6 +5,8 @@ It serializes builds, protects installations during commands, and defers install
 Compilation can finish while an editor, database, or test harness continues running.
 Busy operations return **75**, so an installation can be retried later.
 
+한국어 설명: [무엇을 하는 도구인가, 왜 필요한가, 각 action을 사용하지 않으면 무엇이 달라지는가](docs/overview.ko.md).
+
 ## Requirements and installation
 
 Use Python 3.10 or newer, Linux `/proc`, GNU `realpath`, and CMake.
