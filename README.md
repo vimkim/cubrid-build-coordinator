@@ -24,12 +24,24 @@ uv run --locked cubrid-build-coordinator --help
 The `.python-version` file selects Python 3.14 for development. Python 3.10 remains supported.
 Commit `uv.lock` after dependency changes. Use `uv add` or `uv remove` to manage dependencies.
 
-Run `just sync` from the permanent checkout to install or refresh the CLI in `~/.local/bin`.
-It prepares the uv environment and links its installed entrypoint into the command directory.
-Keep the checkout and its uv environment in place.
-`just install` is an alias for `just sync`.
-Set `CUBRID_BUILD_COORDINATOR_BIN_DIR` to choose another destination directory.
-The installer upgrades this checkout's older source-launcher link and refuses files or links owned by other checkouts.
+Run `just sync` to install or refresh an independent CLI with `uv tool install --reinstall .`.
+`just install` remains an alias. The regular installation runs without the source checkout or its `.venv`.
+Run sync again after source changes, even when the package version stays the same.
+Use `uv run --locked cubrid-build-coordinator` for development against the current source.
+
+uv manages the tool environment and executable directory, normally `~/.local/bin`.
+Use `uv tool dir --bin` to locate the commands, and `UV_TOOL_BIN_DIR` to choose another directory.
+`UV_TOOL_BIN_DIR` replaces `CUBRID_BUILD_COORDINATOR_BIN_DIR`.
+Run `uv tool update-shell` if the command directory is absent from PATH.
+Remove the installed CLI with `uv tool uninstall cubrid-build-coordinator`.
+Tool installation resolves dependencies separately from the project's `uv.lock`.
+This package currently has no third-party runtime dependencies.
+
+An existing legacy symlink can make the first sync fail with `Executable already exists`.
+Inspect its target with `readlink -f "$(uv tool dir --bin)/cubrid-build-coordinator"`.
+If it points to this checkout's `bin/cubrid-build-coordinator` or `.venv/bin/cubrid-build-coordinator`,
+migrate it once with `uv tool install --reinstall --force .`. Subsequent refreshes use `just sync`.
+
 The `my-cubrid` daily updater includes this project in its default list.
 To update only this tool, run `daily-update-cubrid /path/to/cubrid-build-coordinator`.
 
