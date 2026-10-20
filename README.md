@@ -9,19 +9,27 @@ Busy operations return **75**, so an installation can be retried later.
 
 Use Python 3.10 or newer, Linux `/proc`, GNU `realpath`, and CMake.
 Host runtime selection also needs Bash and `cub-workenv`.
+Use [uv](https://docs.astral.sh/uv/) to manage the project environment.
 The Python package has no third-party runtime dependencies.
 
-Run directly from a checkout:
+Prepare the locked environment and run the CLI:
 
 ```sh
-bin/cubrid-build-coordinator --help
+uv sync --locked
+uv run --locked cubrid-build-coordinator --help
 ```
 
-To link the launcher into `~/.local/bin`, run `just install` from the permanent checkout.
-Keep that checkout in place because the launcher imports its adjacent package.
+The `.python-version` file selects Python 3.14 for development. Python 3.10 remains supported.
+Commit `uv.lock` after dependency changes. Use `uv add` or `uv remove` to manage dependencies.
+
+Run `just sync` from the permanent checkout to install or refresh the CLI in `~/.local/bin`.
+It prepares the uv environment and links its installed entrypoint into the command directory.
+Keep the checkout and its uv environment in place.
+`just install` is an alias for `just sync`.
 Set `CUBRID_BUILD_COORDINATOR_BIN_DIR` to choose another destination directory.
-The installer refuses to replace an existing file or a link to another checkout.
-Alternatively, install the package into a Python environment with `pip install .`.
+The installer upgrades this checkout's older source-launcher link and refuses files or links owned by other checkouts.
+The `my-cubrid` daily updater includes this project in its default list.
+To update only this tool, run `daily-update-cubrid /path/to/cubrid-build-coordinator`.
 
 Existing `my-cubrid` recipes use an `exec` shim at `bin/cubrid-build-coordinator.sh`.
 Install this CLI before integrating that shim.
@@ -109,7 +117,11 @@ JDK destination adjustment and installation can leave partial changes after fail
 
 Run `just test` for the Python acceptance and imported baseline suites.
 Run `just test-bash` for the unchanged Bash baseline fixtures.
-Both commands also work as the Python commands in [verification evidence](docs/verification.md).
+Both recipes run through `uv run --locked`.
+Use `just setup` for `uv sync --locked`, and `just build` for `uv build`.
+The build produces a wheel and source distribution under `dist/`.
+CI uses uv with both Python 3.10 and 3.14.
+See [verification evidence](docs/verification.md) for the original extraction checks.
 Optional shared-recipe checks use `MY_CUBRID_UNDER_TEST` when that checkout is available.
 
 The implementation separates action policy, locks, process supervision, workenv adaptation, and owner inspection.
