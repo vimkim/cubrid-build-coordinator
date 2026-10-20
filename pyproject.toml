@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cubrid-build-coordinator"
+version = "0.1.0"
+description = "Foreground build and installation coordination for CUBRID on Linux"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+cubrid-build-coordinator = "cubrid_build_coordinator.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cubrid_build_coordinator*"]
