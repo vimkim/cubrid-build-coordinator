@@ -12,16 +12,18 @@ USAGE = '''Usage: cubrid-build-coordinator ACTION [ARGUMENTS]
 
 Actions:
   configure
-  compile
+  build
   target <target>
-  build [runtime-wait-seconds]
+  build-and-install [runtime-wait-seconds] [--stop-runtime]
   install [runtime-wait-seconds]
   install-target <target> [runtime-wait-seconds]
   runtime [lock-wait-seconds] [--database NAME] -- command [args...]
   installation-use [lock-wait-seconds] [--database NAME] -- command [args...]
   installation-delete [lock-wait-seconds]
-  stop-and-build
   locks [--all] [--json]
+
+configure generates build rules; build produces artifacts; install copies existing artifacts.
+build-and-install combines build and install. --stop-runtime explicitly stops services before installation.
 
 Coordinator lock contention returns 75. Resolve the busy state before retrying.
 Child command failures retain their exit status. Read stderr for the failure reason.

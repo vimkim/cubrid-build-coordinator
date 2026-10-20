@@ -14,6 +14,8 @@ import time
 import unittest
 from unittest import mock
 
+from cli_compat import coordinator_command
+
 
 PROJECT = Path(__file__).resolve().parents[1]
 COORDINATOR = Path(os.environ.get('COORDINATOR_UNDER_TEST', PROJECT / 'bin/cubrid-build-coordinator'))
@@ -222,7 +224,8 @@ class LockStatusTest(unittest.TestCase):
             while not ready.exists() and time.monotonic() < deadline:
                 time.sleep(.01)
             self.assertTrue(ready.exists())
-            result = self.invoke('compile')
+            result = subprocess.run(coordinator_command(COORDINATOR, 'build'), env=self.env,
+                                    cwd=self.root, text=True, capture_output=True, timeout=5)
             self.assertEqual(result.returncode, 75, result.stderr)
             self.assertIn(f'PID {holder.pid}', result.stderr)
             report = json.loads(self.invoke('locks', '--json').stdout)

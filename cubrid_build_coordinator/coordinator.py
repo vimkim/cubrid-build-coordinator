@@ -30,7 +30,7 @@ class Coordinator:
         self.locks = Locks(self.env['CUBRID_BUILD_DIR'], self.env['CUBRID'])
         self.request = None
         self.stop_attempts = []
-        self.compiled = False
+        self.built = False
 
     def run(self, command, phase='command execution'):
         try:
@@ -42,8 +42,8 @@ class Coordinator:
 
     def retry_command(self):
         if self.request is None:
-            return 'cubrid-build-coordinator stop-and-build'
-        if self.request.name == 'build' and self.compiled:
+            return 'cubrid-build-coordinator build-and-install --stop-runtime'
+        if self.request.name == 'build-and-install' and self.built and not self.request.stop_runtime:
             return command_text(['cubrid-build-coordinator', 'install', str(self.request.wait)])
         if self.request.name in ('runtime', 'installation-use'):
             prefix = ['cubrid-build-coordinator', self.request.name, str(self.request.wait)]
@@ -74,7 +74,7 @@ class Coordinator:
         return active_install_processes(self.locks.install)
 
     def report_busy(self, processes):
-        action = self.request.name if self.request else 'stop-and-build'
+        action = self.request.name if self.request else 'build-and-install --stop-runtime'
         print(f'\n{action} deferred: the target CUBRID environment is busy.', file=sys.stderr)
         print(f'Environment: {self.env["CUBRID"]}', file=sys.stderr)
         if processes:
@@ -105,14 +105,15 @@ class Coordinator:
         raise ActionError(f'Installation lock or idle check did not succeed within {wait} seconds. '
                           f'Retry with: {self.retry_command()}', 75)
 
-    def compile(self):
+    def build(self):
         presets.verify_build(self.env, self.locks.build)
         try:
-            self.run(['cmake', '--build', '--preset', self.env['PRESET_MODE']], 'compilation')
+            self.run(['cmake', '--build', '--preset', self.env['PRESET_MODE']], 'build')
         except ActionError as error:
-            raise ActionError(f'{error}\nCompilation failed. Installation was not attempted.',
+            raise ActionError(f'{error}\nBuild failed. Installation was not attempted.',
                               error.status) from error
-        self.compiled = True
+        self.built = True
+        print('Build completed successfully!', flush=True)
 
     def install(self):
         presets.verify_destdir(self.env)
@@ -135,10 +136,10 @@ class Coordinator:
             self.run(['cmake', '-E', 'remove', str(install_jdk)], 'JDK destination adjustment')
         self.run(['cmake', '--install', self.locks.build, '--prefix', self.locks.install],
                  'installation')
-        print('Build and install completed successfully!', flush=True)
+        print('Installation completed successfully!', flush=True)
 
     def guidance(self):
-        print('Build-only installation is ready. Initialize explicitly when needed:')
+        print('Installation is ready. Initialize explicitly when needed:')
         print('  ' + shlex.join(['cub-workenv', 'init', '--worktree', self.env.get('PWD') or os.getcwd(),
                                   '--install', self.env['CUBRID'], '--preset', self.env['PRESET_MODE']]))
         print('Existing work environments are preserved; use cub-workenv doctor after rebuilding.')
@@ -234,16 +235,16 @@ class Coordinator:
             if action == 'configure':
                 presets.verify_build(self.env, self.locks.build, configure=True)
                 self.run(['cmake', '--preset', self.env['PRESET_MODE']], 'CMake configuration')
-            elif action == 'compile':
-                self.compile()
+            elif action == 'build':
+                self.build()
             elif action in ('target', 'install-target'):
                 presets.verify_build(self.env, self.locks.build, installation_target=True)
                 presets.verify_install_prefix(self.locks.build, self.locks.install)
                 self.runtime_lock(request.wait, idle=True)
                 self.run(['cmake', '--build', '--preset', self.env['PRESET_MODE'], '--target', request.target],
                          'CMake target execution. A failed installation target may leave partial changes')
-            elif action == 'stop-and-build':
-                self.compile()
+            elif request.stop_runtime:
+                self.build()
                 self.runtime_lock(request.wait)
                 self.select()
                 presets.verify_destdir(self.env, 'selected host environment')
@@ -251,8 +252,8 @@ class Coordinator:
                 self.install()
                 self.guidance()
             else:
-                if action == 'build':
-                    self.compile()
+                if action == 'build-and-install':
+                    self.build()
                 self.runtime_lock(request.wait, idle=True)
                 if action == 'installation-delete':
                     self.delete()

@@ -19,6 +19,7 @@ import unittest
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 from cubrid_build_coordinator.locks import canonical
+from cli_compat import coordinator_command
 
 PYTHON = PROJECT / 'bin/cubrid-build-coordinator'
 BASH = PROJECT / 'tests/fixtures/bash/cubrid-build-coordinator.sh'
@@ -68,7 +69,7 @@ print('export CUBRID_RUNTIME_READY=1')
         return path
 
     def invoke(self, *args, cli=PYTHON, env=None, **kwargs):
-        return subprocess.run([str(cli), *map(str, args)], env=env or self.env,
+        return subprocess.run(coordinator_command(cli, *args), env=env or self.env,
                               cwd=self.root, capture_output=True, text=True, timeout=8, **kwargs)
 
     def commands(self):
@@ -133,13 +134,13 @@ print('export CUBRID_RUNTIME_READY=1')
 
     def test_all_action_traces_match_bash(self):
         cases = [(['configure'], [['cmake','--preset','debug']]),
-                 (['compile'], [['cmake','--build','--preset','debug']]),
+                 (['build'], [['cmake','--build','--preset','debug']]),
                  (['target','target with spaces'], [['cmake','--build','--preset','debug','--target','target with spaces']]),
                  (['install-target','util/install','0'], [['cmake','--build','--preset','debug','--target','util/install']]),
                  (['install','0'], [['cmake','--install',self.env['CUBRID_BUILD_DIR'],'--prefix',self.env['CUBRID']]]),
-                 (['build','0'], [['cmake','--build','--preset','debug'],
+                 (['build-and-install','0'], [['cmake','--build','--preset','debug'],
                                   ['cmake','--install',self.env['CUBRID_BUILD_DIR'],'--prefix',self.env['CUBRID']]]),
-                 (['stop-and-build'], [['cmake','--build','--preset','debug'],
+                 (['build-and-install', '--stop-runtime'], [['cmake','--build','--preset','debug'],
                                        ['cmake','--install',self.env['CUBRID_BUILD_DIR'],'--prefix',self.env['CUBRID']]])]
         for cli in (BASH, PYTHON):
             for args, expected in cases:
@@ -150,7 +151,7 @@ print('export CUBRID_RUNTIME_READY=1')
                     self.assertEqual(self.commands(), expected)
 
     def test_usage_and_child_status_match_bash(self):
-        cases = [([],64), (['wat'],64), (['compile','extra'],64), (['target'],64),
+        cases = [([],64), (['wat'],64), (['build','extra'],64), (['target'],64),
                  (['install-target'],64), (['runtime','0','--'],64),
                  (['runtime','-1','--','true'],64), (['install','1.5'],64),
                  (['installation-use','0','--','sh','-c','exit 23'],23),
@@ -169,18 +170,18 @@ print('export CUBRID_RUNTIME_READY=1')
         self.env['CUBRID_RUNTIME_LOCK_TIMEOUT'] = '100'
         with self.held('runtime'):
             for cli in (BASH, PYTHON):
-                for args in [('build',), ('install',), ('install-target','util/install')]:
+                for args in [('build-and-install',), ('install',), ('install-target','util/install')]:
                     with self.subTest(cli=cli, args=args):
                         result = self.invoke(*args, cli=cli)
                         self.assertEqual(result.returncode, 75, result.stderr)
         result = self.invoke('install')
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_compile_then_defer_and_install_only_retry(self):
+    def test_build_then_defer_and_install_only_retry(self):
         for cli in (BASH, PYTHON):
             self.log.unlink(missing_ok=True)
             with self.held('runtime'):
-                result = self.invoke('build', '0', cli=cli)
+                result = self.invoke('build-and-install', '0', cli=cli)
                 self.assertEqual(result.returncode, 75, result.stderr)
                 self.assertEqual(self.commands(), [['cmake','--build','--preset','debug']])
             result = self.invoke('install', '0', cli=cli)
@@ -219,13 +220,13 @@ print('export CUBRID_RUNTIME_READY=1')
         self.env['COMPILE_DELAY'] = '.5'
         for first, second in ((BASH,PYTHON),(PYTHON,BASH)):
             self.log.unlink(missing_ok=True)
-            child = subprocess.Popen([str(first),'compile'],env=self.env,cwd=self.root)
+            child = subprocess.Popen(coordinator_command(first, 'build'),env=self.env,cwd=self.root)
             try:
                 self.wait_for(lambda: bool(self.commands()))
-                result = self.invoke('compile',cli=second)
+                result = self.invoke('build',cli=second)
                 self.assertEqual(result.returncode,75,result.stderr)
                 env = dict(self.env, CUBRID_BUILD_DIR=str(self.root/'other-build'))
-                self.assertEqual(self.invoke('compile',cli=second,env=env).returncode,0)
+                self.assertEqual(self.invoke('build',cli=second,env=env).returncode,0)
             finally:
                 child.wait(timeout=5)
 
@@ -233,11 +234,11 @@ print('export CUBRID_RUNTIME_READY=1')
         for cli, contender in ((BASH,PYTHON),(PYTHON,BASH)):
             with self.subTest(cli=cli), self.held('runtime'):
                 self.log.unlink(missing_ok=True)
-                child = subprocess.Popen([str(cli),'build','2'],env=self.env,cwd=self.root,
+                child = subprocess.Popen(coordinator_command(cli, 'build-and-install', '2'),env=self.env,cwd=self.root,
                                          stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                 try:
                     self.wait_for(lambda: bool(self.commands()))
-                    self.assertEqual(self.invoke('compile',cli=contender).returncode,75)
+                    self.assertEqual(self.invoke('build',cli=contender).returncode,75)
                     self.assertIsNone(child.poll())
                 finally:
                     child.wait(timeout=5)
@@ -393,7 +394,7 @@ if args == ['service','stop']: sys.exit(3)
         for cli in (BASH,PYTHON):
             with self.subTest(cli=cli):
                 self.log.unlink(missing_ok=True)
-                result = self.invoke('stop-and-build',cli=cli)
+                result = self.invoke('build-and-install', '--stop-runtime',cli=cli)
                 self.assertEqual(result.returncode,0,result.stderr)
                 self.assertEqual(self.commands(),[
                     ['cmake','--build','--preset','debug'],['cubrid','server','status'],
@@ -401,10 +402,10 @@ if args == ['service','stop']: sys.exit(3)
                     ['cubrid','service','stop'],['cubrid','broker','stop'],
                     ['cmake','--install',self.env['CUBRID_BUILD_DIR'],'--prefix',self.env['CUBRID']]])
 
-    def test_compile_failure_prevents_stop_and_install_failure_propagates(self):
+    def test_build_failure_prevents_stop_and_install_failure_propagates(self):
         self.cubrid_fixture()
         self.env['COMPILE_STATUS']='9'
-        result = self.invoke('stop-and-build')
+        result = self.invoke('build-and-install', '--stop-runtime')
         self.assertEqual(result.returncode,9,result.stderr)
         self.assertEqual(self.commands(),[['cmake','--build','--preset','debug']])
         self.env['INSTALL_STATUS']='12'
@@ -416,7 +417,7 @@ if args == ['service','stop']: sys.exit(3)
         executable=Path(self.env['CUBRID'])/'native-sleep'
         shutil.copy2(shutil.which('sleep'),executable)
         native=subprocess.Popen([str(executable),'60'])
-        child=subprocess.Popen([str(PYTHON),'stop-and-build'],cwd=self.root,env=self.env,
+        child=subprocess.Popen([str(PYTHON),'build-and-install', '--stop-runtime'],cwd=self.root,env=self.env,
                                stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         try:
             stdout,stderr=child.communicate(timeout=38)

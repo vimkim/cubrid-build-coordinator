@@ -89,3 +89,35 @@ Install the launcher from the permanent checkout before consumers use the merged
 Retain the old read-only `cubrid-lock-status.py` compatibility helper in `my-cubrid` for direct consumers.
 The Python coordinator uses the packaged inspector and does not depend on that helper.
 No changes to `cubrid-workenv` or the CUBRID engine are required.
+
+## Build stage terminology verification — 2026-10-21
+
+The current stages are `configure`, `build`, and `install`; `build-and-install`
+combines the last two. Explicit stopping uses `build-and-install --stop-runtime`.
+The extraction evidence above retains the command names used at that time.
+`tests/cli_compat.py` translates current actions only for the frozen Bash fixture;
+production commands use the new names directly.
+
+With the three candidate checkouts selected through
+`MY_CUBRID_UNDER_TEST`, `CUBRID_BUILD_COORDINATOR_CLI`, and `CUB_WORKENV_CLI`:
+
+| Check | Result |
+| --- | --- |
+| Coordinator acceptance and validation | 88 passed |
+| Frozen Bash baseline | 28 passed |
+| Companion my-cubrid runtime locks, lock status, shim/recipes, loader, and workenv integration | 15 + 13 + 4 + 15 + 1 passed |
+| Companion cubrid-workenv unit suite | 39 passed |
+
+The real CMake recipe test proves that `configure-build` produces artifacts
+while installation is locked, `build-and-install` defers with 75, `install`
+uses existing artifacts after the source changes, and
+`configure-build-and-install` refreshes the installation without initializing a DB.
+Stop-option validation and retry guidance, stage-specific success messages,
+and build-log failure propagation are covered. The original Bash fixture is unchanged.
+No complete CUBRID engine rebuild or native DB/container regression run was performed
+for this terminology change.
+
+Apply the coordinator and shared recipes together; the coordinator's installed
+CLI must be refreshed from the permanent checkout before using the new recipes.
+The companion workenv change updates diagnostics, workflow guidance, and its
+shared-recipe probe without changing host initialization behavior.

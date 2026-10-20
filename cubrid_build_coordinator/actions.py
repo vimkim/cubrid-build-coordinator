@@ -22,6 +22,7 @@ class Action:
     target: str = ''
     database: str = ''
     command: tuple[str, ...] = ()
+    stop_runtime: bool = False
 
 
 def parse(action, arguments, env):
@@ -29,12 +30,14 @@ def parse(action, arguments, env):
     target = database = ''
     command = ()
     wait = 0
+    stop_runtime = False
     runtime_default = env.get('CUBRID_RUNTIME_LOCK_TIMEOUT') or '300'
-    if action in ('configure', 'compile', 'stop-and-build'):
+    if action in ('compile', 'stop-and-build'):
+        replacement = 'build' if action == 'compile' else 'build-and-install --stop-runtime'
+        raise UsageError(f'{action} was renamed; use {replacement}')
+    if action in ('configure', 'build'):
         if args:
             raise UsageError(f'{action} takes no arguments')
-        if action == 'stop-and-build':
-            wait = seconds(runtime_default, 'CUBRID_RUNTIME_LOCK_TIMEOUT')
     elif action in ('target', 'install-target'):
         maximum = 1 if action == 'target' else 2
         if not 1 <= len(args) <= maximum or not args[0].strip():
@@ -42,11 +45,15 @@ def parse(action, arguments, env):
                              + (' and optional timeout' if maximum == 2 else ''))
         target = args[0]
         wait = seconds(args[1] if len(args) == 2 else '0', f'{action} timeout')
-    elif action in ('build', 'install', 'installation-delete'):
+    elif action in ('build-and-install', 'install', 'installation-delete'):
+        if action == 'build-and-install' and '--stop-runtime' in args:
+            args.remove('--stop-runtime')
+            stop_runtime = True
         if len(args) > 1:
             raise UsageError(f'{action} accepts at most one timeout')
-        default = runtime_default if action == 'installation-delete' else '0'
-        source = ('CUBRID_RUNTIME_LOCK_TIMEOUT' if not args and action == 'installation-delete'
+        runtime_wait = action == 'installation-delete' or stop_runtime
+        default = runtime_default if runtime_wait else '0'
+        source = ('CUBRID_RUNTIME_LOCK_TIMEOUT' if not args and runtime_wait
                   else f'{action} timeout')
         wait = seconds(args[0] if args else default, source)
     elif action in ('runtime', 'installation-use'):
@@ -70,6 +77,6 @@ def parse(action, arguments, env):
         raise UsageError(f'unknown action: {action}')
     build_wait = (0 if action in ('runtime', 'installation-use') else
                   seconds(env.get('CUBRID_BUILD_LOCK_TIMEOUT') or '600', 'CUBRID_BUILD_LOCK_TIMEOUT'))
-    if action in ('build', 'install', 'target', 'install-target', 'stop-and-build'):
+    if action in ('build-and-install', 'install', 'target', 'install-target'):
         verify_destdir(env)
-    return Action(action, tuple(arguments), build_wait, wait, target, database, command)
+    return Action(action, tuple(arguments), build_wait, wait, target, database, command, stop_runtime)

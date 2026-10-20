@@ -23,7 +23,7 @@ class ActionValidationTest(unittest.TestCase):
 
     def test_bad_arguments_do_not_run_commands_or_create_locks(self):
         case = self.fixture
-        cases = [('build', '-1'), ('install-target', 'util/install', '1.5'),
+        cases = [('build-and-install', '-1'), ('install-target', 'util/install', '1.5'),
                  ('runtime', '0', '--database', '', '--', 'true'),
                  ('installation-use', '0', '--database'), ('target', '')]
         for args in cases:
@@ -38,10 +38,58 @@ class ActionValidationTest(unittest.TestCase):
     def test_usage_errors_are_reported_before_missing_environment(self):
         env = dict(self.fixture.env)
         env.pop('PRESET_MODE')
-        result = self.fixture.invoke('build', '-1', env=env)
+        result = self.fixture.invoke('build-and-install', '-1', env=env)
         self.assertEqual(result.returncode, 64, result.stderr)
         self.assertIn('timeout', result.stderr)
         self.assertIn('-1', result.stderr)
+
+    def test_build_ignores_a_busy_installation_and_installation_wait_settings(self):
+        case = self.fixture
+        env = dict(case.env, CUBRID_RUNTIME_LOCK_TIMEOUT='invalid', DESTDIR='/unused-stage')
+        with case.held('runtime'):
+            result = case.invoke('build', env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(case.commands(), [['cmake', '--build', '--preset', 'debug']])
+        self.assertIn('Build completed', result.stdout)
+        self.assertNotIn('Installation completed', result.stdout)
+        self.assertNotIn('Initialize', result.stdout)
+
+    def test_install_only_does_not_claim_a_build(self):
+        result = self.fixture.invoke('install')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.fixture.commands()[0][1], '--install')
+        self.assertEqual(len(self.fixture.commands()), 1)
+        self.assertIn('Installation completed', result.stdout)
+        self.assertNotIn('Build completed', result.stdout)
+
+    def test_retired_names_and_invalid_stop_flags_fail_before_work(self):
+        for args, replacement in [(('compile',), 'build'),
+                                  (('stop-and-build',), 'build-and-install --stop-runtime'),
+                                  (('build', '--stop-runtime'), 'takes no arguments'),
+                                  (('install', '--stop-runtime'), 'timeout'),
+                                  (('build-and-install', '--stop-runtime', '--stop-runtime'), 'timeout')]:
+            with self.subTest(args=args):
+                result = self.fixture.invoke(*args)
+                self.assertEqual(result.returncode, 64, result.stderr)
+                self.assertIn(replacement, result.stderr)
+                self.assertEqual(self.fixture.commands(), [])
+                self.assertFalse((self.fixture.root / f'cubrid-dev-locks-{os.getuid()}').exists())
+
+    def test_stop_option_accepts_explicit_wait_in_either_order(self):
+        case = self.fixture
+        for args in [('build-and-install', '0', '--stop-runtime'),
+                     ('build-and-install', '--stop-runtime', '0')]:
+            with self.subTest(args=args):
+                case.log.unlink(missing_ok=True)
+                result = case.invoke(*args, env=dict(case.env, CUBRID_RUNTIME_LOCK_TIMEOUT='invalid'))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual([command[1] for command in case.commands()], ['--build', '--install'])
+
+    def test_busy_stop_retry_retains_explicit_stop_request(self):
+        with self.fixture.held('runtime'):
+            result = self.fixture.invoke('build-and-install', '0', '--stop-runtime')
+        self.assertEqual(result.returncode, 75, result.stderr)
+        self.assertIn('cubrid-build-coordinator build-and-install 0 --stop-runtime', result.stderr)
 
     def test_optional_wait_before_database_uses_default(self):
         for action in ('runtime', 'installation-use'):
@@ -51,13 +99,13 @@ class ActionValidationTest(unittest.TestCase):
 
     def test_invalid_stop_wait_is_rejected_before_compilation(self):
         env = dict(self.fixture.env, CUBRID_RUNTIME_LOCK_TIMEOUT='invalid')
-        result = self.fixture.invoke('stop-and-build', env=env)
+        result = self.fixture.invoke('build-and-install', '--stop-runtime', env=env)
         self.assertEqual(result.returncode, 64, result.stderr)
         self.assertEqual(self.fixture.commands(), [])
 
     def test_staging_environment_is_rejected_before_building_or_installing(self):
         env = dict(self.fixture.env, DESTDIR=str(self.fixture.root / 'stage'))
-        for args in [('build',), ('install',), ('stop-and-build',), ('target', 'install')]:
+        for args in [('build-and-install',), ('install',), ('build-and-install', '--stop-runtime',), ('target', 'install')]:
             with self.subTest(args=args):
                 result = self.fixture.invoke(*args, env=env)
                 self.assertEqual(result.returncode, 64, result.stderr)
@@ -157,7 +205,7 @@ class ActionValidationTest(unittest.TestCase):
         self.fixture.cubrid_fixture()
         (Path(self.fixture.env['CUBRID']) / 'bin/cubrid').write_text(
             f'#!{sys.executable}\nprint("status probe refused")\nraise SystemExit(6)\n')
-        result = self.fixture.invoke('stop-and-build')
+        result = self.fixture.invoke('build-and-install', '--stop-runtime')
         self.assertEqual(result.returncode, 6, result.stderr)
         self.assertIn('status probe refused', result.stderr)
         self.assertIn('server status', result.stderr)
@@ -167,7 +215,7 @@ class ActionValidationTest(unittest.TestCase):
         self.fixture.script('cub-workenv',
                             'print("export CUBRID_RUNTIME_READY=1")\n'
                             f'print("export CUBRID_BUILD_DIR={other}")\n')
-        result = self.fixture.invoke('stop-and-build')
+        result = self.fixture.invoke('build-and-install', '--stop-runtime')
         self.assertEqual(result.returncode, 0, result.stderr)
         install = self.fixture.commands()[-1]
         self.assertEqual(install[1:3], ['--install', self.fixture.env['CUBRID_BUILD_DIR']])
@@ -178,7 +226,7 @@ class ActionValidationTest(unittest.TestCase):
         self.fixture.script('cub-workenv',
                             'print("export CUBRID_RUNTIME_READY=1")\n'
                             f'print("export DESTDIR={self.fixture.root / "stage"}")\n')
-        result = self.fixture.invoke('stop-and-build')
+        result = self.fixture.invoke('build-and-install', '--stop-runtime')
         self.assertEqual(result.returncode, 64, result.stderr)
         self.assertIn('DESTDIR', result.stderr)
         self.assertEqual(self.fixture.commands(), [['cmake', '--build', '--preset', 'debug']])
@@ -225,9 +273,9 @@ class CMakeResourceValidationTest(unittest.TestCase):
         self.assertFalse((self.root / 'build').exists())
         self.assertFalse((self.root / 'wrong').exists())
 
-    def test_compile_refuses_a_different_preset_directory_before_building(self):
+    def test_build_refuses_a_different_preset_directory_before_building(self):
         self.configure()
-        result = self.invoke('compile', env=dict(self.env, CUBRID_BUILD_DIR=str(self.root / 'wrong')))
+        result = self.invoke('build', env=dict(self.env, CUBRID_BUILD_DIR=str(self.root / 'wrong')))
         self.assertEqual(result.returncode, 64, result.stderr)
         self.assertFalse((self.root / 'build/compiled').exists())
 
@@ -285,13 +333,13 @@ class CMakeResourceValidationTest(unittest.TestCase):
             with self.subTest(options=options):
                 self.presets['buildPresets'][0]['nativeToolOptions'] = options
                 self.write_presets()
-                result = self.invoke('compile', env=dict(self.env, NATIVE_DIRECTORY_OPTION='-C'))
+                result = self.invoke('build', env=dict(self.env, NATIVE_DIRECTORY_OPTION='-C'))
                 self.assertEqual(result.returncode, 64, result.stderr)
                 self.assertIn('nativeToolOptions', result.stderr)
                 self.assertFalse((other / 'compiled').exists())
 
-    def test_matching_paths_still_configure_compile_and_install(self):
-        for args in [('configure',), ('compile',), ('install-target', 'install', '0')]:
+    def test_matching_paths_still_configure_build_and_install(self):
+        for args in [('configure',), ('build',), ('install-target', 'install', '0')]:
             result = self.invoke(*args)
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.root / 'install/share/payload').read_text(), 'probe\n')
@@ -342,7 +390,7 @@ class CMakeResourceValidationTest(unittest.TestCase):
         env = dict(self.env, PRESET_MODE='cfg', CUBRID_BUILD_DIR=str(self.root / 'build_cfg'))
         configured = self.invoke('configure', env=env)
         self.assertEqual(configured.returncode, 0, configured.stderr)
-        built = self.invoke('compile', env=dict(env, PRESET_MODE='debug'))
+        built = self.invoke('build', env=dict(env, PRESET_MODE='debug'))
         self.assertEqual(built.returncode, 0, built.stderr)
         self.assertTrue((self.root / 'build_cfg/compiled').exists())
 

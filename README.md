@@ -58,26 +58,36 @@ Timeout arguments are non-negative integer seconds.
 | Action | Behavior |
 | --- | --- |
 | `configure` | Configure the selected CMake preset under the build lock |
-| `compile` | Compile under the build lock |
+| `build` | Produce build artifacts under the build lock; do not install |
 | `target TARGET` | Build a target under both locks after checking native processes |
-| `build [SECONDS]` | Compile, acquire an idle installation, then install |
+| `build-and-install [SECONDS] [--stop-runtime]` | Build artifacts, then install; the flag explicitly stops the selected runtime before installation |
 | `install [SECONDS]` | Install existing build output into an idle installation |
 | `install-target TARGET [SECONDS]` | Build a possible installation target under both locks |
 | `runtime [SECONDS] [--database NAME] -- COMMAND...` | Lock the installation, select the host environment, then supervise the command |
 | `installation-use [SECONDS] [--database NAME] -- COMMAND...` | Supervise a command under the installation lock without host selection |
 | `installation-delete [SECONDS]` | Require both locks, native inactivity, and deletion guards before removing the prefix |
-| `stop-and-build` | Compile, select and explicitly stop the runtime, wait for exit, then install |
 | `locks [--all] [--json]` | Inspect owners without creating or acquiring locks |
+
+The stages are `configure` → `build` → `install`. `build-and-install` combines the last two;
+configuration remains explicit. For example, `build` can succeed while the installation is busy,
+and `install` can later copy those artifacts without rebuilding.
+
+This replaces the former names: `compile` → `build`, `build` → `build-and-install`,
+and `stop-and-build` → `build-and-install --stop-runtime`. The retired commands return
+usage errors with replacement guidance. Existing callers of `build` must switch to
+`build-and-install` when they require installation; no alias can preserve both meanings.
+Update the coordinator and companion `my-cubrid` recipes together.
 
 The build-lock default is 600 seconds, configured by `CUBRID_BUILD_LOCK_TIMEOUT`.
 The runtime default is 300 seconds, configured by `CUBRID_RUNTIME_LOCK_TIMEOUT`.
-Full and partial installations default to **zero** seconds, regardless of that runtime setting.
+Ordinary full and partial installations default to **zero** seconds, regardless of that runtime setting.
+`build-and-install --stop-runtime` uses the runtime default unless an explicit timeout is supplied.
 Timeouts limit acquisition or idle waiting, not compilation or command execution.
 The timeout before `--database` is optional. All arguments and applicable timeout defaults are checked before locks or commands.
 Use the command separator. The CLI never shell-expands command arguments.
 
 ```sh
-cubrid-build-coordinator build
+cubrid-build-coordinator build-and-install
 # If compilation succeeds but installation returns 75:
 cubrid-build-coordinator install
 cubrid-build-coordinator runtime 300 --database example -- csql -S -u dba example
@@ -92,7 +102,7 @@ Inspector argument errors return 2. Unknown inspection state returns 1.
 
 ## Target validation and failure reports
 
-Before configuration or compilation, the coordinator resolves the selected preset's `binaryDir` and compares it with the locked `CUBRID_BUILD_DIR`.
+Before configuration or building, the coordinator resolves the selected preset's `binaryDir` and compares it with the locked `CUBRID_BUILD_DIR`.
 Target actions also compare the cached `CMAKE_INSTALL_PREFIX` with the locked `CUBRID` before running the target.
 A mismatch returns 64 and prints both paths and the correction needed. Missing or unsupported path definitions also return 64.
 Full installation uses the canonical locked build and installation paths, including after host environment selection.
@@ -111,7 +121,7 @@ Direct edits to preset files and filesystem aliases still require coordination b
 Failures print the action, reason, and exit status on stderr.
 Child failures also identify the execution phase and command. Common credential options and inline shell/Python/SQL code are hidden in command displays.
 Signal failures name the signal. Child output remains available on the original streams.
-Busy reports preserve the requested action in retry guidance. A compiled `build` suggests `install`.
+Busy reports preserve the requested action in retry guidance. A completed build in ordinary `build-and-install` suggests `install`.
 Stop failures list the stop commands attempted and explain that services may remain stopped.
 Installation failures report possible partial changes and the absence of automatic rollback or restart.
 
@@ -143,10 +153,10 @@ Lock files remain after release. Removing a lock pathname can split callers acro
 `cub-workenv` owns initialization, selection, configuration, and database registration.
 The Bash adapter evaluates its existing emitted shell code and captures the resulting environment through a separate descriptor.
 Selection failure prevents command execution. A selected installation must match the locked installation.
-Build and install never initialize databases. Database-name checks establish registration only.
+Building and installation never initialize databases. Database-name checks establish registration only.
 
 Ordinary builds never stop processes.
-`stop-and-build` stops registered servers, service, and broker, then waits up to 30 seconds without forced killing or automatic restart.
+`build-and-install --stop-runtime` stops registered servers, service, and broker, then waits up to 30 seconds without forced killing or automatic restart.
 Deletion refuses prefixes containing cwd, home, the build directory, or regular `*_vinf`/`*_lgat` files.
 The path guards check canonical aliases as well as lexical paths.
 They do not inventory external database storage.

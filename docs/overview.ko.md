@@ -6,6 +6,11 @@
 
 이 문서는 현재 Python 구현의 동작을 설명한다. 설치 방법과 간단한 사용법은 [README](../README.md), 기존 Bash 구현과의 호환성 검증은 [검증 기록](verification.md)을 참고한다.
 
+명령은 `configure` → `build` → `install` 단계로 구분한다. `build`는 산출물만 만들고,
+`build-and-install`은 빌드 후 설치까지 수행한다. 이전 `compile`은 `build`로,
+이전 `build`는 `build-and-install`로 바뀌었다. 이전 `stop-and-build` 대신
+`build-and-install --stop-runtime`을 사용한다. 기존 호출자와 공용 레시피를 함께 갱신해야 한다.
+
 ## 어떤 문제를 해결하는가
 
 여러 터미널이나 자동화 작업이 같은 개발 환경을 사용할 때 다음 상황이 생긴다.
@@ -14,13 +19,13 @@
 
 | 상황 | coordinator를 거치지 않으면 생길 수 있는 일 | coordinator의 처리 | 대응하는 명령 |
 | --- | --- | --- | --- |
-| 두 작업이 같은 빌드 디렉터리에서 configure·compile을 수행 | CMake 설정과 생성 파일, 빌드 산출물의 변경이 겹침 | 빌드 디렉터리별 잠금으로 순서를 정함 | 설정은 `configure`, 컴파일만 할 때는 `compile`, 컴파일 후 설치까지 할 때는 `build` |
-| 서로 다른 빌드 디렉터리에서 같은 경로로 설치 | 서로 다른 산출물의 설치가 겹침 | 설치 디렉터리별 잠금으로 설치를 직렬화함 | 전체 설치는 `build [SECONDS]` 또는 `install [SECONDS]`, 부분 설치는 `install-target TARGET [SECONDS]`; `target TARGET`도 같은 잠금 적용 |
-| DB나 테스트가 쓰는 설치 경로에 새 파일을 설치 | 실행 중인 코드와 이후 읽는 파일의 버전이 달라지거나 설치가 실패할 수 있음 | 설치 잠금과 실행 중인 프로세스를 확인하고, 사용 중이면 설치를 보류함 | 설치 쪽의 `build [SECONDS]`·`install [SECONDS]`·`install-target TARGET [SECONDS]`·`target TARGET`; 컴파일 후 설치가 보류되면 `install 300`으로 재시도 |
+| 두 작업이 같은 빌드 디렉터리에서 configure·build를 수행 | CMake 설정과 생성 파일, 빌드 산출물의 변경이 겹침 | 빌드 디렉터리별 잠금으로 순서를 정함 | 설정은 `configure`, 컴파일만 할 때는 `build`, 컴파일 후 설치까지 할 때는 `build-and-install` |
+| 서로 다른 빌드 디렉터리에서 같은 경로로 설치 | 서로 다른 산출물의 설치가 겹침 | 설치 디렉터리별 잠금으로 설치를 직렬화함 | 전체 설치는 `build-and-install [SECONDS]` 또는 `install [SECONDS]`, 부분 설치는 `install-target TARGET [SECONDS]`; `target TARGET`도 같은 잠금 적용 |
+| DB나 테스트가 쓰는 설치 경로에 새 파일을 설치 | 실행 중인 코드와 이후 읽는 파일의 버전이 달라지거나 설치가 실패할 수 있음 | 설치 잠금과 실행 중인 프로세스를 확인하고, 사용 중이면 설치를 보류함 | 설치 쪽의 `build-and-install [SECONDS]`·`install [SECONDS]`·`install-target TARGET [SECONDS]`·`target TARGET`; 컴파일 후 설치가 보류되면 `install 300`으로 재시도 |
 | 설정 편집기·디버거·컨테이너 작업이 설치 경로를 사용 | 실행 파일 검사만으로는 작업 전체의 사용 기간을 알기 어려움 | 명령 또는 전경에서 대기하는 실행 도우미가 끝날 때까지 설치 잠금을 유지함 | 호스트 환경을 선택할 때는 `runtime 300 -- COMMAND...`, 전달받은 환경으로 테스트·컨테이너 도우미 등을 실행할 때는 `installation-use 300 -- COMMAND...` |
 | 설치가 대기 중인데 원인을 모름 | 어떤 터미널이나 작업을 마쳐야 하는지 찾기 어려움 | 잠금 소유자의 PID·명령·작업 디렉터리·터미널을 보고함 | 현재 경로는 `locks`, 현재 사용자의 같은 잠금 네임스페이스 전체는 `locks --all`; JSON 출력은 `--json` 추가 |
 
-예를 들어 설정 편집기가 설치 디렉터리 사용 잠금을 잡고 있을 때 `build`를 실행하면, 컴파일은 성공해도 설치 단계에서 종료 코드 `75`를 받을 수 있다. 편집기를 종료한 뒤 `install`을 실행하면 이미 만들어 둔 산출물을 설치한다. 일반 `build`는 편집기나 DB를 종료하지 않는다.
+예를 들어 설정 편집기가 설치 디렉터리 사용 잠금을 잡고 있을 때 `build-and-install`을 실행하면, 컴파일은 성공해도 설치 단계에서 종료 코드 `75`를 받을 수 있다. 편집기를 종료한 뒤 `install`을 실행하면 이미 만들어 둔 산출물을 설치한다. 일반 `build-and-install`은 편집기나 DB를 종료하지 않는다.
 
 도구를 사용하지 않아도 단독 작업에서 CMake나 CUBRID 명령을 실행할 수는 있다. 다만 위와 같은 동시 작업의 순서와 사용 기간을 호출자가 직접 관리해야 한다. 한쪽만 coordinator를 사용해도 직접 실행한 다른 쪽이 잠금에 참여하지 않으면 보호에 빈틈이 생긴다.
 
@@ -51,7 +56,7 @@ coordinator는 명령을 실행하는 동안 전경에서 동작한다. 설치�
 - 같은 설치 경로에서 서로 다른 DB를 선택해도 R을 공유한다. DB 이름은 잠금 식별 기준이 아니다.
 - 심볼릭 링크 등으로 표기가 달라도 `realpath -m` 결과가 같으면 같은 자원으로 취급한다.
 
-B와 R이 모두 필요한 action은 **B → R 순서**로 획득한다. `build`는 컴파일 후 R을 기다리는 동안에도 B를 유지한다. 따라서 같은 빌드 디렉터리의 다른 컴파일은 그 대기가 끝날 때까지 기다릴 수 있다.
+B와 R이 모두 필요한 action은 **B → R 순서**로 획득한다. `build-and-install`은 컴파일 후 R을 기다리는 동안에도 B를 유지한다. 따라서 같은 빌드 디렉터리의 다른 컴파일은 그 대기가 끝날 때까지 기다릴 수 있다.
 
 잠금 파일은 다음 네임스페이스에 둔다. 파일 이름의 해시는 정규화한 자원 경로의 바이트로 계산한다. 기존 Bash와의 호환성을 위해 해시 계산 시 경로 끝의 개행 바이트를 제거한다.
 
@@ -70,15 +75,15 @@ ${XDG_RUNTIME_DIR:-/tmp}/cubrid-dev-locks-${UID}/
 | Action | 처리 순서 | 호스트 환경 선택 |
 | --- | --- | --- |
 | `configure` | B → CMake 설정 | 없음 |
-| `compile` | B → 컴파일 | 없음 |
+| `build` | B → 컴파일 | 없음 |
 | `target TARGET` | B → R → 유휴 확인 → 타깃 실행 | 없음 |
-| `build [SECONDS]` | B → 컴파일 → R → 유휴 확인 → 전체 설치 | 없음 |
+| `build-and-install [SECONDS]` | B → 컴파일 → R → 유휴 확인 → 전체 설치 | 없음 |
 | `install [SECONDS]` | B → R → 유휴 확인 → 기존 산출물 전체 설치 | 없음 |
 | `install-target TARGET [SECONDS]` | B → R → 유휴 확인 → 타깃 실행 | 없음 |
 | `runtime [SECONDS] [--database NAME] -- COMMAND...` | R → 환경 선택 → 선택적 DB 등록 확인 → 명령 실행 | `cub-workenv`로 선택 |
 | `installation-use [SECONDS] [--database NAME] -- COMMAND...` | R → 선택적 DB 등록 확인 → 명령 실행 | 없음 |
 | `installation-delete [SECONDS]` | B → R → 유휴 확인 → 삭제 경로·저장 파일 확인 → 삭제 | 없음 |
-| `stop-and-build` | B → 컴파일 → R → 환경 선택 → 명시적 중지 → 유휴 확인 → 전체 설치 | `cub-workenv`로 선택 |
+| `build-and-install [SECONDS] --stop-runtime` | B → 컴파일 → R → 환경 선택 → 명시적 중지 → 유휴 확인 → 전체 설치 | `cub-workenv`로 선택 |
 | `locks [--all] [--json]` | 잠금과 소유자 조회 | 없음 |
 
 ### `configure`: 빌드 설정을 변경하는 진입점
@@ -89,17 +94,17 @@ cubrid-build-coordinator configure
 
 B를 잡고 `cmake --preset "$PRESET_MODE"`를 실행한다. 빌드 설정을 생성·갱신하는 단계이며 컴파일과 설치는 수행하지 않는다.
 
-설정 단계도 빌드 디렉터리를 변경하므로 컴파일과 같은 B를 사용한다. 직접 CMake 설정을 실행하면 다른 coordinator 작업과 설정 변경이 겹칠 수 있다. `build`가 configure를 자동 실행하지는 않는다. 최초 설정이나 설정 변경이 필요할 때 이 단계를 별도로 수행한다.
+설정 단계도 빌드 디렉터리를 변경하므로 컴파일과 같은 B를 사용한다. 직접 CMake 설정을 실행하면 다른 coordinator 작업과 설정 변경이 겹칠 수 있다. `build`와 `build-and-install`이 configure를 자동 실행하지는 않는다. 최초 설정이나 설정 변경이 필요할 때 이 단계를 별도로 수행한다.
 
-### `compile`: 실행 환경을 건드리지 않고 산출물만 생성
+### `build`: 실행 환경을 건드리지 않고 산출물만 생성
 
 ```sh
-cubrid-build-coordinator compile
+cubrid-build-coordinator build
 ```
 
 B를 잡고 `cmake --build --preset "$PRESET_MODE"`를 실행한다. R을 잡지 않으므로 같은 설치 경로를 사용하는 DB·편집기·테스트가 있어도 컴파일할 수 있다. 이 설명은 일반 컴파일 타깃이 빌드 트리만 변경한다는 전제다. 설치할 수 있는 임의 타깃은 아래 `target`으로 실행한다.
 
-이 action은 컴파일 결과만 확인하거나 설치를 나중으로 미룰 때 필요하다. 직접 컴파일하면 같은 빌드 디렉터리의 다른 설정·컴파일·설치와 순서를 조정하지 못한다. 또한 `compile` 성공만으로 설치 경로의 CUBRID가 새 버전으로 바뀌지는 않는다.
+이 action은 컴파일 결과만 확인하거나 설치를 나중으로 미룰 때 필요하다. 직접 컴파일하면 같은 빌드 디렉터리의 다른 설정·컴파일·설치와 순서를 조정하지 못한다. 또한 `build` 성공만으로 설치 경로의 CUBRID가 새 버전으로 바뀌지는 않는다.
 
 ### `target TARGET`: 임의 타깃을 보수적으로 보호
 
@@ -117,18 +122,18 @@ cmake --build --preset "$PRESET_MODE" --target util/install
 
 직접 `cmake --build ... --target ...`을 실행하면 이 보호를 우회한다. 설치 타깃이었을 경우 실행 중인 환경을 변경할 수 있다. 현재 `target`의 R 대기는 0초이며, CLI에서 별도의 대기 시간을 받지 않는다.
 
-### `build`: 컴파일 후 사용 가능한 시점에 설치
+### `build-and-install`: 컴파일 후 사용 가능한 시점에 설치
 
 ```sh
-cubrid-build-coordinator build
-cubrid-build-coordinator build 300
+cubrid-build-coordinator build-and-install
+cubrid-build-coordinator build-and-install 300
 ```
 
 B를 잡고 컴파일한다. 성공하면 B를 유지한 채 R 획득과 유휴 확인을 시도하고, 통과하면 전체 설치한다. 컴파일 실패 시 설치하지 않는다. 설치 대기 시간의 기본값은 0초다.
 
 ```mermaid
 flowchart TD
-    Start["build 실행"] --> B["B 획득"]
+    Start["build-and-install 실행"] --> B["B 획득"]
     B --> Compile["컴파일"]
     Compile --> Result{"컴파일 성공?"}
     Result -->|아니요| Fail["실패 코드 반환, 설치 생략"]
@@ -138,9 +143,9 @@ flowchart TD
     Install --> Done["잠금 해제 후 성공 반환"]
 ```
 
-이 action은 컴파일과 설치 사이에 다른 작업이 같은 빌드 산출물을 바꾸지 못하게 한다. 직접 컴파일 후 설치하거나 `compile`과 `install`을 별도 호출하면 두 단계 사이에 B가 해제되어 다른 작업이 끼어들 수 있다.
+이 action은 컴파일과 설치 사이에 다른 작업이 같은 빌드 산출물을 바꾸지 못하게 한다. 직접 컴파일 후 설치하거나 `build`와 `install`을 별도 호출하면 두 단계 사이에 B가 해제되어 다른 작업이 끼어들 수 있다.
 
-일반 `build`는 프로세스를 중지하지 않는다. 설치가 보류되면 사용 중인 작업을 마친 뒤 `install`로 재시도한다. `build 300`은 컴파일 후 최대 300초 동안 설치 가능 여부를 기다리며, 자동 재시도를 예약하는 명령은 아니다.
+일반 `build-and-install`은 프로세스를 중지하지 않는다. 설치가 보류되면 사용 중인 작업을 마친 뒤 `install`로 재시도한다. `build-and-install 300`은 컴파일 후 최대 300초 동안 설치 가능 여부를 기다리며, 자동 재시도를 예약하는 명령은 아니다.
 
 ### `install`: 다시 컴파일하지 않고 설치만 재시도
 
@@ -155,7 +160,7 @@ B와 R을 잡고 유휴 확인 후 다음 명령으로 기존 산출물을 설�
 cmake --install "$CUBRID_BUILD_DIR" --prefix "$CUBRID"
 ```
 
-컴파일이 끝났는데 설치만 보류된 경우 필요한 action이다. 이 단계에서 다시 `build`할 필요는 없다. 다만 `install`은 소스 변경을 컴파일하지 않으므로, 설치할 산출물이 최신인지 호출자가 판단해야 한다.
+컴파일이 끝났는데 설치만 보류된 경우 필요한 action이다. 이 단계에서 다시 `build-and-install`할 필요는 없다. 다만 `install`은 소스 변경을 컴파일하지 않으므로, 설치할 산출물이 최신인지 호출자가 판단해야 한다.
 
 전체 설치 전에는 빌드의 `vm/jdk8`이 디렉터리인지 심볼릭 링크인지에 맞춰 설치 대상의 기존 형태를 조정한다. 직접 `cmake --install`을 실행하면 잠금·유휴 확인과 이 JDK 전환 처리를 건너뛴다. 설치는 원자적 교체가 아니며, 중간 실패 시 일부 파일이 이미 바뀌었을 수 있다.
 
@@ -214,13 +219,13 @@ B와 R, 유휴 확인을 통과한 뒤 삭제 대상 경로를 검사한다. 대
 
 직접 `rm -rf`를 실행하면 사용 중인 설치 확인, 빌드 작업과의 조정, 넓은 삭제 경로 및 DB 저장 파일 방어를 모두 건너뛴다.
 
-### `stop-and-build`: 중지를 명시적으로 요청한 경우의 재설치
+### `build-and-install --stop-runtime`: 중지를 명시적으로 요청한 경우의 재설치
 
 ```sh
-cubrid-build-coordinator stop-and-build
+cubrid-build-coordinator build-and-install --stop-runtime
 ```
 
-일반 `build`와 달리 실행 환경을 중지하고 설치하는 action이다. 순서는 다음과 같다.
+일반 `build-and-install`과 달리 실행 환경을 중지하고 설치하는 action이다. 순서는 다음과 같다.
 
 1. B를 잡고 먼저 컴파일한다. 컴파일 실패 시 중지 단계로 가지 않는다.
 2. R을 잡고 `cub-workenv`로 호스트 환경을 선택·확인한다.
@@ -231,7 +236,7 @@ cubrid-build-coordinator stop-and-build
 
 30초가 지나도 프로세스가 남으면 종료 코드 `1`을 반환하고 설치하지 않는다. 강제 종료로 전환하지 않는다. `service stop`·`broker stop`의 실패 자체는 무시하고 이후 프로세스 확인으로 설치 가능 여부를 판단한다.
 
-이 action은 중지와 재설치를 하나의 잠금 구간으로 조정하고, 컴파일 실패 때문에 불필요하게 서버를 먼저 내리는 일을 피한다. 직접 중지 후 빌드하면 그 순서와 잠금을 호출자가 관리해야 한다. 일반 `build`만 사용하면 실행 중인 환경을 보존하며 설치를 보류하므로, 명시적인 중지 동작은 일어나지 않는다.
+이 action은 중지와 재설치를 하나의 잠금 구간으로 조정하고, 컴파일 실패 때문에 불필요하게 서버를 먼저 내리는 일을 피한다. 직접 중지 후 빌드하면 그 순서와 잠금을 호출자가 관리해야 한다. 일반 `build-and-install`만 사용하면 실행 중인 환경을 보존하며 설치를 보류하므로, 명시적인 중지 동작은 일어나지 않는다.
 
 이 CLI action 자체에는 확인 질문이 없다. 중지를 원할 때만 선택한다. 중지 도중이나 설치 단계에서 실패하면 이미 중지한 일부 프로세스는 그대로 중지 상태일 수 있다.
 
@@ -263,7 +268,7 @@ cubrid-build-coordinator locks --json
 | `CUBRID_BUILD_DIR` | 해당 프리셋의 빌드 디렉터리 |
 | `CUBRID` | 사용할 설치 디렉터리 |
 
-configure·compile 및 컴파일을 포함하는 action은 실행 전에 프리셋의 실제 `binaryDir`와 잠근 `CUBRID_BUILD_DIR`가 같은지 검사한다. 빌드 프리셋이 가리키는 configure 프리셋도 따라간다. 불일치하면 종료 코드 `64`와 함께 양쪽 경로·프리셋 이름·수정 방법을 출력하며, CMake 설정·컴파일을 실행하지 않는다. 전체 설치는 호스트 환경 선택 후에도 최초에 잠근 정규화 경로를 사용한다.
+configure·build 및 컴파일을 포함하는 action은 실행 전에 프리셋의 실제 `binaryDir`와 잠근 `CUBRID_BUILD_DIR`가 같은지 검사한다. 빌드 프리셋이 가리키는 configure 프리셋도 따라간다. 불일치하면 종료 코드 `64`와 함께 양쪽 경로·프리셋 이름·수정 방법을 출력하며, CMake 설정·컴파일을 실행하지 않는다. 전체 설치는 호스트 환경 선택 후에도 최초에 잠근 정규화 경로를 사용한다.
 
 경로 확인은 CMake를 실행하지 않고 프로젝트·사용자 프리셋, include, 상속 및 경로 매크로를 읽어 수행한다. 파일 오류, 순환 참조, 지원하지 않는 매크로 등으로 경로를 확인할 수 없으면 이유를 출력하고 거절한다. 다른 디렉터리의 프리셋에서 상속한 `${fileDir}`는 CMake 버전별 해석이 달라 거절한다. 이 경우 `${sourceDir}` 또는 명시적인 절대 경로를 사용한다. 프리셋 파일이나 심볼릭 링크를 직접 변경하는 작업도 호출자가 별도로 조정해야 한다.
 
@@ -276,16 +281,16 @@ configure·compile 및 컴파일을 포함하는 action은 실행 전에 프리�
 | 대기 대상 | 기본값 | 변경 방법 |
 | --- | --- | --- |
 | B 획득 | 600초 | `CUBRID_BUILD_LOCK_TIMEOUT` |
-| `build`, `install`, `install-target`의 R·유휴 확인 | 0초 | action의 `SECONDS` 인수 |
+| `build-and-install`, `install`, `install-target`의 R·유휴 확인 | 0초 | action의 `SECONDS` 인수 |
 | `target`의 R·유휴 확인 | 0초 | 해당 action에는 대기 인수 없음 |
 | `runtime`, `installation-use`의 R 획득 | 300초 | `CUBRID_RUNTIME_LOCK_TIMEOUT` 또는 `SECONDS` |
 | `installation-delete`의 R·유휴 확인 | 300초 | `CUBRID_RUNTIME_LOCK_TIMEOUT` 또는 `SECONDS` |
-| `stop-and-build`의 R 획득 | 300초 | `CUBRID_RUNTIME_LOCK_TIMEOUT` |
+| `build-and-install --stop-runtime`의 R 획득 | 300초 | `SECONDS` 또는 `CUBRID_RUNTIME_LOCK_TIMEOUT` |
 | 명시적 중지 후 프로세스 종료 확인 | 30초 | 고정값 |
 
 `CUBRID_RUNTIME_LOCK_TIMEOUT`을 늘려도 일반 설치 action의 기본 대기 0초는 바뀌지 않는다. 대기 시간은 0 이상의 정수 초이며, 잠금 획득이나 유휴 상태 대기에 적용된다. 컴파일 시간이나 실행하는 명령의 전체 수행 시간 제한이 아니다.
 
-`runtime`·`installation-use`에서 `--database` 앞의 숫자 대기 시간은 생략할 수 있다. 예를 들어 `runtime --database example -- csql -S -u dba example`은 기본 대기 시간을 사용한다. 모든 인수와 해당 action에 적용되는 대기 기본값은 잠금 획득·컴파일 전에 검증한다. `build -1`처럼 잘못된 값은 컴파일을 시작하지 않고 거절한다.
+`runtime`·`installation-use`에서 `--database` 앞의 숫자 대기 시간은 생략할 수 있다. 예를 들어 `runtime --database example -- csql -S -u dba example`은 기본 대기 시간을 사용한다. 모든 인수와 해당 action에 적용되는 대기 기본값은 잠금 획득·컴파일 전에 검증한다. `build-and-install -1`처럼 잘못된 값은 컴파일을 시작하지 않고 거절한다.
 
 전달 명령 앞에는 `--`를 사용한다. coordinator는 전달 인수를 셸 코드로 해석하지 않는다. 셸 연산이 필요하면 호출자가 명시적으로 셸을 실행해야 한다.
 
@@ -304,10 +309,10 @@ configure·compile 및 컴파일을 포함하는 action은 실행 전에 프리�
 실패 시에는 종료 코드와 함께 action 이름과 원인을 stderr에 출력한다. 자식 명령 실패에는 실행 단계·명령·대상 경로도 표시하며, 시그널 종료는 시그널 이름을 표시한다. 자격 증명에 흔히 쓰는 옵션 값과 인라인 셸·Python·SQL 코드는 명령 표시에서 가린다. 자식 명령 자체의 출력은 원래 스트림에 유지된다.
 
 ```text
-Error: build failed (exit 64): build timeout: timeout must be a non-negative integer: -1
+Error: build-and-install failed (exit 64): build-and-install timeout: timeout must be a non-negative integer: -1
 ```
 
-설치나 타깃 실행이 사용 중인 환경 때문에 보류되면 요청한 action을 유지한 재시도 명령을 안내한다. 컴파일이 끝난 `build`는 `install`을 안내한다. 중지를 이미 시도했다면 시도한 명령과 일부 서비스가 중지 상태일 수 있음을 표시하며, 이때는 “중지한 프로세스가 없다”고 안내하지 않는다. 설치 실패에는 부분 변경이 남을 수 있고 자동 롤백·재시작을 하지 않았다는 설명을 덧붙인다.
+설치나 타깃 실행이 사용 중인 환경 때문에 보류되면 요청한 action을 유지한 재시도 명령을 안내한다. 컴파일이 끝난 일반 `build-and-install`은 `install`을 안내한다. `--stop-runtime`을 요청한 경우에는 재시도 명령에도 이 옵션을 유지한다. 중지를 이미 시도했다면 시도한 명령과 일부 서비스가 중지 상태일 수 있음을 표시하며, 이때는 “중지한 프로세스가 없다”고 안내하지 않는다. 설치 실패에는 부분 변경이 남을 수 있고 자동 롤백·재시작을 하지 않았다는 설명을 덧붙인다.
 
 컴파일 후 설치 보류가 확인된 경우의 흐름은 다음과 같다.
 

@@ -12,6 +12,8 @@ import tempfile
 import time
 import unittest
 
+from cli_compat import coordinator_command
+
 
 PROJECT = Path(__file__).resolve().parents[1]
 COORDINATOR = Path(os.environ.get('COORDINATOR_UNDER_TEST', PROJECT / 'bin/cubrid-build-coordinator'))
@@ -95,7 +97,7 @@ class RuntimeLockTest(unittest.TestCase):
                     self.assertFalse(marker.exists())
                     self.assertIn('runtime_invalid', result.stderr)
 
-    def test_stop_and_build_revalidates_before_stopping_or_installing(self):
+    def test_build_and_install_stop_runtime_revalidates_before_stopping_or_installing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             command_log = root / 'commands.log'
@@ -122,7 +124,7 @@ class RuntimeLockTest(unittest.TestCase):
             env['PATH'] = f'{command_bin}:{env["PATH"]}'
 
             result = subprocess.run(
-                [str(COORDINATOR), 'stop-and-build'],
+                coordinator_command(COORDINATOR, 'build-and-install', '--stop-runtime'),
                 cwd=root,
                 env=env,
                 capture_output=True,
@@ -215,7 +217,7 @@ class RuntimeLockTest(unittest.TestCase):
                 f'echo start >> {str(log)!r}\nsleep 0.2\necho end >> {str(log)!r}\n')
             cmake.chmod(0o755)
             env['PATH'] = str(command_bin) + ':' + env['PATH']
-            processes = [subprocess.Popen([str(COORDINATOR), 'compile'], cwd=root, env=env) for _ in range(2)]
+            processes = [subprocess.Popen(coordinator_command(COORDINATOR, 'build'), cwd=root, env=env) for _ in range(2)]
             for process in processes:
                 self.assertEqual(process.wait(timeout=5), 0)
             self.assertEqual(log.read_text().splitlines(), ['start', 'end', 'start', 'end'])
@@ -359,7 +361,7 @@ class RuntimeLockTest(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(COORDINATOR), 'build', '0'],
+                coordinator_command(COORDINATOR, 'build-and-install', '0'),
                 cwd=root,
                 env=env,
                 capture_output=True,
