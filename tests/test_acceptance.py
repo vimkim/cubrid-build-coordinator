@@ -39,6 +39,12 @@ class AcceptanceTest(unittest.TestCase):
                         PATH=f'{self.bin}:{os.environ["PATH"]}', COMMAND_LOG=str(self.log))
         for key in ('CUBRID', 'CUBRID_BUILD_DIR', 'CUBRID_DATABASES', 'HOME'):
             Path(self.env[key]).mkdir()
+        (self.root / 'CMakePresets.json').write_text(json.dumps({
+            'version': 3, 'configurePresets': [
+                {'name': 'debug', 'binaryDir': '$env{CUBRID_BUILD_DIR}'}],
+            'buildPresets': [{'name': 'debug', 'configurePreset': 'debug'}]}))
+        (Path(self.env['CUBRID_BUILD_DIR']) / 'CMakeCache.txt').write_text(
+            f'CMAKE_INSTALL_PREFIX:PATH={self.env["CUBRID"]}\n')
         (Path(self.env['CUBRID_DATABASES']) / 'databases.txt').write_text(
             'testdb /data localhost /log\nextra /data localhost /log\n')
         self.script('cmake', '''import json,os,pathlib,shutil,sys,time
@@ -147,13 +153,17 @@ print('export CUBRID_RUNTIME_READY=1')
         cases = [([],64), (['wat'],64), (['compile','extra'],64), (['target'],64),
                  (['install-target'],64), (['runtime','0','--'],64),
                  (['runtime','-1','--','true'],64), (['install','1.5'],64),
-                 (['runtime','--database','extra','--','true'],64),
                  (['installation-use','0','--','sh','-c','exit 23'],23),
                  (['installation-use','0','--','no-such-coordinator-test-command'],1)]
         for cli in (BASH, PYTHON):
             for args, expected in cases:
                 with self.subTest(cli=cli, args=args):
                     self.assertEqual(self.invoke(*args, cli=cli).returncode, expected)
+        # This formerly rejected spelling is now accepted by the documented
+        # optional-timeout interface; the frozen Bash baseline remains unchanged.
+        for cli, expected in ((BASH, 64), (PYTHON, 0)):
+            result = self.invoke('runtime', '--database', 'extra', '--', 'true', cli=cli)
+            self.assertEqual(result.returncode, expected, result.stderr)
 
     def test_install_defaults_remain_zero_when_runtime_wait_is_overridden(self):
         self.env['CUBRID_RUNTIME_LOCK_TIMEOUT'] = '100'
@@ -185,6 +195,9 @@ print('export CUBRID_RUNTIME_READY=1')
             with self.subTest(holder=holder_cli), self.holder(holder_cli):
                 env = dict(self.env, CUBRID=str(alias / 'missing' / '..'),
                            CUBRID_BUILD_DIR=str(self.root / 'different-build'))
+                Path(env['CUBRID_BUILD_DIR']).mkdir(exist_ok=True)
+                (Path(env['CUBRID_BUILD_DIR']) / 'CMakeCache.txt').write_text(
+                    f'CMAKE_INSTALL_PREFIX:PATH={self.env["CUBRID"]}\n')
                 for args in [('installation-use','0','--','true'),('install','0'),
                              ('target','arbitrary'),('installation-delete','0')]:
                     result = self.invoke(*args, cli=contender_cli, env=env)

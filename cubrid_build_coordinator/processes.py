@@ -4,7 +4,7 @@ from pathlib import Path
 import signal
 import subprocess
 
-from .errors import ActionError
+from .errors import ActionError, command_text
 
 
 def run(command, *, env=None, stdout=None, pass_fds=()):
@@ -34,20 +34,28 @@ def run(command, *, env=None, stdout=None, pass_fds=()):
                                      close_fds=True, pass_fds=pass_fds)
         except (FileNotFoundError, PermissionError) as error:
             # The old Python exec trampoline reports launch failures as 1.
-            raise ActionError(str(error)) from error
+            raise ActionError(f'Could not start command: {command_text(command)}\n{error}') from error
         for sig in pending:
             forward(sig, None)
         status = child.wait()
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-    return status if status >= 0 else 128 - status
+    if status < 0:
+        try:
+            name = signal.Signals(-status).name
+        except ValueError:
+            name = f'signal {-status}'
+        raise ActionError(f'Command terminated by {name} (exit {128 - status}): '
+                          f'{command_text(command)}', 128 - status)
+    return status
 
 
 def checked(command, *, env=None, stdout=None, pass_fds=()):
     status = run(command, env=env, stdout=stdout, pass_fds=pass_fds)
     if status:
-        raise ActionError(status=status)
+        raise ActionError(f'Command failed with exit status {status}: {command_text(command)}\n'
+                          'Read the command output above for details.', status)
 
 
 def active_install_processes(prefix):

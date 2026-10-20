@@ -2,6 +2,7 @@
 """A daemon spawned by a runtime command must not retain the coordinator lock."""
 import hashlib
 import fcntl
+import json
 import os
 from pathlib import Path
 import signal
@@ -44,6 +45,13 @@ class RuntimeLockTest(unittest.TestCase):
             CUBRID_DATABASES=str(root / 'databases'),
         )
         environment.pop('CUBRID_RUNTIME_LOCK_HELD', None)
+        (root / 'CMakePresets.json').write_text(json.dumps({
+            'version': 3, 'configurePresets': [
+                {'name': 'debug', 'binaryDir': '$env{CUBRID_BUILD_DIR}'}],
+            'buildPresets': [{'name': 'debug', 'configurePreset': 'debug'}]}))
+        build = Path(environment['CUBRID_BUILD_DIR'])
+        build.mkdir()
+        (build / 'CMakeCache.txt').write_text(f'CMAKE_INSTALL_PREFIX:PATH={environment["CUBRID"]}\n')
         return environment
 
     def test_installation_use_does_not_require_host_initialization(self):

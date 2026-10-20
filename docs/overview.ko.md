@@ -170,7 +170,7 @@ B와 R을 잡고 유휴 확인 후 지정한 CMake 타깃을 실행한다. 일�
 
 현재 실제 타깃 실행과 보호 방식은 `target`과 같다. 별도 action이 있는 이유는 부분 설치라는 호출 의도를 드러내고, 선택적인 설치 대기 시간을 받을 수 있게 하기 위해서다. 기본 대기는 0초다. `install-target` 자체가 전체 `install()` 처리를 호출하지는 않으므로, 앞의 JDK 전환 처리도 수행하지 않는다.
 
-`target`과 `install-target`은 타깃 호출에 `--prefix "$CUBRID"`를 덧붙이지 않는다. 타깃이 실제로 변경하는 설치 위치도 R이 보호하는 `CUBRID` 경로와 일치하도록 구성해야 한다.
+`target`과 `install-target`은 타깃 호출에 `--prefix "$CUBRID"`를 덧붙이지 않는다. 대신 실행 전에 빌드 캐시의 `CMAKE_INSTALL_PREFIX`와 R이 보호하는 `CUBRID` 경로가 같은지 검사한다. 다르면 양쪽 경로와 수정 방법을 출력하고 타깃을 실행하지 않는다. 이 검사는 일반 CMake 설치 경로를 대상으로 하며, 사용자 정의 스크립트나 절대 경로를 지정한 설치 규칙의 모든 변경 위치까지 분석하지는 않는다.
 
 이 action을 거치지 않고 부분 설치하면 전체 설치와 마찬가지로 빌드·설치 충돌과 실행 중인 환경 변경을 막지 못한다.
 
@@ -263,7 +263,13 @@ cubrid-build-coordinator locks --json
 | `CUBRID_BUILD_DIR` | 해당 프리셋의 빌드 디렉터리 |
 | `CUBRID` | 사용할 설치 디렉터리 |
 
-`PRESET_MODE`가 가리키는 실제 빌드 위치와 `CUBRID_BUILD_DIR`는 일치하도록 호출 환경에서 설정해야 한다. coordinator는 이 값들로 실행 대상과 잠금 대상을 정하며, 프리셋 정의를 별도로 분석해 일치 여부를 검증하지 않는다.
+configure·compile 및 컴파일을 포함하는 action은 실행 전에 프리셋의 실제 `binaryDir`와 잠근 `CUBRID_BUILD_DIR`가 같은지 검사한다. 빌드 프리셋이 가리키는 configure 프리셋도 따라간다. 불일치하면 종료 코드 `64`와 함께 양쪽 경로·프리셋 이름·수정 방법을 출력하며, CMake 설정·컴파일을 실행하지 않는다. 전체 설치는 호스트 환경 선택 후에도 최초에 잠근 정규화 경로를 사용한다.
+
+경로 확인은 CMake를 실행하지 않고 프로젝트·사용자 프리셋, include, 상속 및 경로 매크로를 읽어 수행한다. 파일 오류, 순환 참조, 지원하지 않는 매크로 등으로 경로를 확인할 수 없으면 이유를 출력하고 거절한다. 다른 디렉터리의 프리셋에서 상속한 `${fileDir}`는 CMake 버전별 해석이 달라 거절한다. 이 경우 `${sourceDir}` 또는 명시적인 절대 경로를 사용한다. 프리셋 파일이나 심볼릭 링크를 직접 변경하는 작업도 호출자가 별도로 조정해야 한다.
+
+설치 위치를 우회하는 설정도 확인한다. 설치를 포함하는 action은 비어 있지 않은 `DESTDIR`를 거절하고, 타깃 실행에서는 프리셋 환경에서 설정한 값도 확인한다. 캐시의 `CMAKE_STAGING_PREFIX`가 잠근 설치 경로 밖을 가리켜도 거절한다. `nativeToolOptions`로 빌드 디렉터리·빌드 파일을 바꾸거나 `DESTDIR`를 전달하는 경우도 실행 전에 거절하며, 문제를 일으킨 옵션을 출력한다.
+
+`nativeToolOptions`에 매크로가 있으면 경로 변경 옵션으로 확장될 수 있어 거절한다. 이 필드에는 경로를 우회하지 않는 명시적인 값을 사용한다.
 
 `locks` 기본 조회에는 `CUBRID_BUILD_DIR`와 `CUBRID`가 필요하고 `PRESET_MODE`는 필요 없다. `locks --all`에는 이 세 값이 모두 필요 없다.
 
@@ -279,7 +285,9 @@ cubrid-build-coordinator locks --json
 
 `CUBRID_RUNTIME_LOCK_TIMEOUT`을 늘려도 일반 설치 action의 기본 대기 0초는 바뀌지 않는다. 대기 시간은 0 이상의 정수 초이며, 잠금 획득이나 유휴 상태 대기에 적용된다. 컴파일 시간이나 실행하는 명령의 전체 수행 시간 제한이 아니다.
 
-`runtime`·`installation-use`에서 `--database`를 사용할 때는 호환되는 파싱을 위해 숫자 대기 시간을 먼저 적는다. 전달 명령 앞에는 `--`를 사용한다. coordinator는 전달 인수를 셸 코드로 해석하지 않는다. 셸 연산이 필요하면 호출자가 명시적으로 셸을 실행해야 한다.
+`runtime`·`installation-use`에서 `--database` 앞의 숫자 대기 시간은 생략할 수 있다. 예를 들어 `runtime --database example -- csql -S -u dba example`은 기본 대기 시간을 사용한다. 모든 인수와 해당 action에 적용되는 대기 기본값은 잠금 획득·컴파일 전에 검증한다. `build -1`처럼 잘못된 값은 컴파일을 시작하지 않고 거절한다.
+
+전달 명령 앞에는 `--`를 사용한다. coordinator는 전달 인수를 셸 코드로 해석하지 않는다. 셸 연산이 필요하면 호출자가 명시적으로 셸을 실행해야 한다.
 
 ## 종료 코드와 설치 보류 처리
 
@@ -292,6 +300,14 @@ cubrid-build-coordinator locks --json
 | 그 외 | 자식 명령·환경 선택 실패 코드 전달. 시그널 종료는 `128 + 시그널 번호` |
 
 `locks`의 인수 오류는 별도 파서가 처리하므로 `2`를 반환한다. 자식 명령의 상태를 그대로 전달하기 때문에 숫자만으로 원인을 단정하지 말고 진단 메시지도 확인한다.
+
+실패 시에는 종료 코드와 함께 action 이름과 원인을 stderr에 출력한다. 자식 명령 실패에는 실행 단계·명령·대상 경로도 표시하며, 시그널 종료는 시그널 이름을 표시한다. 자격 증명에 흔히 쓰는 옵션 값과 인라인 셸·Python·SQL 코드는 명령 표시에서 가린다. 자식 명령 자체의 출력은 원래 스트림에 유지된다.
+
+```text
+Error: build failed (exit 64): build timeout: timeout must be a non-negative integer: -1
+```
+
+설치나 타깃 실행이 사용 중인 환경 때문에 보류되면 요청한 action을 유지한 재시도 명령을 안내한다. 컴파일이 끝난 `build`는 `install`을 안내한다. 중지를 이미 시도했다면 시도한 명령과 일부 서비스가 중지 상태일 수 있음을 표시하며, 이때는 “중지한 프로세스가 없다”고 안내하지 않는다. 설치 실패에는 부분 변경이 남을 수 있고 자동 롤백·재시작을 하지 않았다는 설명을 덧붙인다.
 
 컴파일 후 설치 보류가 확인된 경우의 흐름은 다음과 같다.
 
@@ -315,6 +331,8 @@ cubrid-build-coordinator locks --json
 | 확인할 내용 | 저장소 근거 |
 | --- | --- |
 | action 문법과 종료 코드 | [cli.py](../cubrid_build_coordinator/cli.py) |
+| 실행 전 인수·대기 시간 검증 | [actions.py](../cubrid_build_coordinator/actions.py) |
+| 프리셋 빌드 경로와 부분 설치 prefix 확인 | [presets.py](../cubrid_build_coordinator/presets.py) |
 | action별 순서, 중지·삭제·JDK 처리 | [coordinator.py](../cubrid_build_coordinator/coordinator.py) |
 | 경로 정규화, 잠금 식별과 획득 | [locks.py](../cubrid_build_coordinator/locks.py) |
 | 자식 명령 감독과 네이티브 실행 파일 검사 | [processes.py](../cubrid_build_coordinator/processes.py) |
@@ -322,5 +340,6 @@ cubrid-build-coordinator locks --json
 | 잠금 소유자 조회 | [status.py](../cubrid_build_coordinator/status.py) |
 | 컴파일 후 설치 보류·재시도, 혼합 호출자, 중지 순서와 삭제 방어 검증 | [test_acceptance.py](../tests/test_acceptance.py) |
 | 명령 수명·잠금 해제와 조회 검증 | [test_runtime_legacy.py](../tests/test_runtime_legacy.py), [test_status_legacy.py](../tests/test_status_legacy.py) |
+| 실제 CMake 경로 불일치 거절·선행 인수 검증·오류 진단 검증 | [test_validation.py](../tests/test_validation.py) |
 
 이 저장소의 검증은 임시 설치 디렉터리와 테스트용 명령을 이용한다. 전체 CUBRID 엔진을 컴파일하거나 사용자 DB의 SQL 동작을 검증하는 테스트는 아니다. 구체적인 실행 범위와 결과는 [검증 기록](verification.md)에 정리되어 있다.

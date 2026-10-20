@@ -1,9 +1,11 @@
 """Command parsing and documented exit statuses."""
+import os
 import shutil
 import subprocess
 import sys
 
-from .errors import ActionError, UsageError
+from .actions import parse
+from .errors import ActionError, UsageError, command_text
 
 
 USAGE = '''Usage: cubrid-build-coordinator ACTION [ARGUMENTS]
@@ -21,29 +23,14 @@ Actions:
   stop-and-build
   locks [--all] [--json]
 
-Exit status 75 means that the operation is safe to retry later.
+Coordinator lock contention returns 75. Resolve the busy state before retrying.
+Child command failures retain their exit status. Read stderr for the failure reason.
 '''
-
-
-def validate(action, args):
-    if action in ('configure', 'compile', 'stop-and-build'):
-        if args:
-            raise UsageError(f'{action} takes no arguments')
-    elif action == 'target':
-        if len(args) != 1:
-            raise UsageError('target requires exactly one CMake target')
-    elif action in ('build', 'install', 'installation-delete'):
-        if len(args) > 1:
-            raise UsageError(f'{action} accepts at most one timeout')
-    elif action == 'install-target':
-        if not 1 <= len(args) <= 2:
-            raise UsageError('install-target requires a target and optional timeout')
-    elif action not in ('runtime', 'installation-use'):
-        raise UsageError(f'unknown action: {action}')
 
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    action = args[0] if args else 'command'
     try:
         if args == ['--help'] or args == ['-h']:
             print(USAGE, end='')
@@ -54,25 +41,29 @@ def main(argv=None):
         if action == 'locks':
             from .status import main as inspect
             return inspect(args)
+        request = parse(action, args, os.environ)
         from .coordinator import Coordinator
-        coordinator = Coordinator()
         for command in ('cmake', 'realpath'):
             if not shutil.which(command):
-                raise UsageError(f'{command} is not available')
-        validate(action, args)
-        coordinator.execute(action, args)
+                raise UsageError(f'Required executable {command!r} was not found on PATH. '
+                                 'Select an environment that provides it before retrying.')
+        coordinator = Coordinator()
+        coordinator.execute(request)
         return 0
     except UsageError as error:
-        print(f'Error: {error}\n{USAGE}', file=sys.stderr, end='')
+        print(f'Error: {action} failed (exit {error.status}): {error}\n{USAGE}', file=sys.stderr, end='')
         return error.status
     except ActionError as error:
-        if str(error):
-            print(str(error), file=sys.stderr)
+        print(f'Error: {action} failed (exit {error.status}): '
+              f'{str(error) or "Operation failed. Inspect the diagnostics above."}', file=sys.stderr)
         return error.status
     except subprocess.CalledProcessError as error:
-        return error.returncode if error.returncode >= 0 else 128 - error.returncode
+        status = error.returncode if error.returncode >= 0 else 128 - error.returncode
+        print(f'Error: {action} failed (exit {status}): {command_text(error.cmd)}', file=sys.stderr)
+        return status
     except OSError as error:
-        print(f'Error: {error}', file=sys.stderr)
+        print(f'Error: {action} failed (exit 1): {error}', file=sys.stderr)
         return 1
     except KeyboardInterrupt:
+        print(f'Error: {action} interrupted (exit 130).', file=sys.stderr)
         return 130

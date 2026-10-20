@@ -12,6 +12,7 @@ import sys
 import time
 
 from cubrid_build_coordinator.locks import canonical, lock_path, namespace as lock_namespace, resource_digest
+from cubrid_build_coordinator.errors import redact
 
 
 PROC = Path('/proc')
@@ -44,23 +45,6 @@ def file_identity(path):
 def start_ticks(process):
     # The comm field can contain spaces and parentheses. Fields after it are fixed.
     return int((process / 'stat').read_text().rsplit(')', 1)[1].split()[19])
-
-
-def redact(command):
-    result = []
-    hide_next = False
-    sensitive = re.compile(r'(^|[-_])(password|passwd|token|secret|api[-_]?key|access[-_]?key)$', re.I)
-    for argument in command:
-        key, separator, _ = argument.partition('=')
-        if hide_next:
-            result.append('<redacted>')
-            hide_next = False
-        elif sensitive.search(key) or key == '-p':
-            result.append(key + '=<redacted>' if separator else argument)
-            hide_next = not separator
-        else:
-            result.append(argument)
-    return result
 
 
 def read_link(path):

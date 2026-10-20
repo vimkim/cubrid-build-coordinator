@@ -73,7 +73,7 @@ The build-lock default is 600 seconds, configured by `CUBRID_BUILD_LOCK_TIMEOUT`
 The runtime default is 300 seconds, configured by `CUBRID_RUNTIME_LOCK_TIMEOUT`.
 Full and partial installations default to **zero** seconds, regardless of that runtime setting.
 Timeouts limit acquisition or idle waiting, not compilation or command execution.
-For compatibility, supply the numeric timeout before `--database`.
+The timeout before `--database` is optional. All arguments and applicable timeout defaults are checked before locks or commands.
 Use the command separator. The CLI never shell-expands command arguments.
 
 ```sh
@@ -89,6 +89,31 @@ Success returns 0, explicit usage errors return 64, and contention returns 75.
 Child and selection failures retain their status. Signal termination returns `128 + signal`.
 As with the Bash implementation, a command launch failure returns 1.
 Inspector argument errors return 2. Unknown inspection state returns 1.
+
+## Target validation and failure reports
+
+Before configuration or compilation, the coordinator resolves the selected preset's `binaryDir` and compares it with the locked `CUBRID_BUILD_DIR`.
+Target actions also compare the cached `CMAKE_INSTALL_PREFIX` with the locked `CUBRID` before running the target.
+A mismatch returns 64 and prints both paths and the correction needed. Missing or unsupported path definitions also return 64.
+Full installation uses the canonical locked build and installation paths, including after host environment selection.
+Installation actions reject non-empty [DESTDIR](https://cmake.org/cmake/help/latest/envvar/DESTDIR.html), including target preset environments, because it relocates files beyond the locked prefix.
+Target checks also reject a cached [CMAKE_STAGING_PREFIX](https://cmake.org/cmake/help/latest/variable/CMAKE_STAGING_PREFIX.html) outside the locked installation.
+Native tool options that override build directories/files or supply `DESTDIR` are rejected before building.
+Native options with macros also require literal values so that path overrides cannot be hidden by expansion.
+
+The resolver reads project/user presets, includes, inheritance, and path macros without executing CMake.
+It follows the [CMake preset path rules](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html).
+Inherited `${fileDir}` values from a different preset directory are rejected because CMake versions interpret them differently.
+Use `${sourceDir}` or an absolute path for that case.
+The prefix check covers conventional CMake installation targets. It cannot determine every path changed by custom target scripts or absolute installation destinations.
+Direct edits to preset files and filesystem aliases still require coordination by callers.
+
+Failures print the action, reason, and exit status on stderr.
+Child failures also identify the execution phase and command. Common credential options and inline shell/Python/SQL code are hidden in command displays.
+Signal failures name the signal. Child output remains available on the original streams.
+Busy reports preserve the requested action in retry guidance. A compiled `build` suggests `install`.
+Stop failures list the stop commands attempted and explain that services may remain stopped.
+Installation failures report possible partial changes and the absence of automatic rollback or restart.
 
 ## Ownership and limits
 
