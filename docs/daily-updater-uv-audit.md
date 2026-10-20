@@ -2,7 +2,9 @@
 
 Date: 2026-10-21, Asia/Seoul. Work tracker: 442.
 
-Implementation and isolated verification are complete. Local integration and live installation await approval.
+Implementation, isolated verification, approved local integration, and live installation are complete.
+The five CLI repositories' main branches were pushed. Dotfiles main contains the two approved local commits.
+All 15 declared commands across the six Python distributions passed live checks as regular uv installations.
 All six available Python CLI projects already had `pyproject.toml` and a committed `uv.lock`.
 No project needed a new uv conversion. Five installers needed regular installation instead of editable installation or a source-environment link.
 `cubrid-conf-tui` already used the required command.
@@ -82,7 +84,8 @@ Its former pre-install legacy-package removal was removed, so a failed new build
 
 The user requested simple reinstall recipes without custom receipt or ownership machinery.
 uv controls executable conflicts and replacement behavior. No new custom ownership guarantee is claimed.
-The coordinator's known legacy links need one explicit `uv tool install --reinstall --force .` migration when refreshing the live tool.
+The coordinator's known legacy links require an explicit `uv tool install --reinstall --force .` migration.
+The observed live `.venv` link was migrated this way, followed by a successful ordinary sync.
 The [coordinator installation guide](../README.md#requirements-and-installation) documents inspection of those two known legacy targets.
 
 The coordinator retains `just install` as an alias for sync.
@@ -140,7 +143,7 @@ The built wheel contained 194 asset entries, including viewer files, vendor chun
 | Documentation and diffs | Markdown source validator and `git diff --check` | Passed for changed human-readable Markdown files and all task diffs. |
 
 The live checker command initially lacked Python Playwright. Validation succeeded through the task project environment and isolated optional-tool installation.
-Live checker setup remains unchanged and pending any requested refresh.
+Live docserve received its default serving-only sync. Optional live checker support remains an explicit `just checker-setup` action.
 The opt-in live Herdr server test was not run. No GUI programs or full-system upkeep were launched.
 
 Raw original-state evidence, installer harnesses, JSON results, and check logs remain outside Git under:
@@ -150,48 +153,52 @@ Raw original-state evidence, installer harnesses, JSON results, and check logs r
 ```
 
 Key files are `original-inventory.json`, `docserve-original.json`, `installer-results.json`, `docserve-checker-result.json`, and `task-commits.json`.
-`verify_installers.py` reconstructs disposable fixtures from the task sources; `verify_docserve_checker.py` verifies optional setup and rendering.
+`integration-preflight.json`, `integration-*.json`, and `live-installations-final.json` record approved integration and live verification.
+`verify_installers.py` reconstructs disposable fixtures from task or merged sources; `verify_docserve_checker.py` verifies optional setup and rendering.
 These local logs and fixtures are verification artifacts, not repository source changes.
 
-## Reviewable commits and checkouts
+## Merged commits and former task checkouts
 
-All destinations are the permanent checkouts' local `main` branches.
-The commits below exist locally. They are not yet merged or pushed.
-The coordinator implementation commit is listed separately from this report's later commit on the same branch.
+All six task branches were merged into their permanent checkouts' local `main` branches with fast-forward merges.
+The five CLI main branches were pushed, and their remote tips were verified.
+Dotfiles pushing was outside the approved scope. Its clean local main is two commits ahead of `origin/main`.
+The coordinator rebased cleanly onto an intervening documentation commit, `d89a757`.
+Its implementation commit is listed separately from the audit commits. The task checkout paths below are historical.
 
 | Repository | Task checkout | Branch | Implementation commit |
 | --- | --- | --- | --- |
 | my-git-utils | `/home/vimkim/gh/my-git-utils-uv-tool` | `fix/regular-uv-tools` | `b3ca34171e23ca6a368161672c38388c4c5e1f88` |
 | herdr-next-to-current | `/home/vimkim/gh/herdr-next-to-current-uv-tool` | `fix/regular-uv-tools` | `26a6de7db266dd04d1ea4a4b3eba829e2512a067` |
 | cubrid-tc-chronicle | `/home/vimkim/gh/cubrid-tc-chronicle-uv-tool` | `fix/regular-uv-tools` | `38a45264f517e5c4a9d4bd5b67254b5739b8868a` |
-| cubrid-build-coordinator | `/home/vimkim/gh/cubrid-build-coordinator-uv-tool` | `fix/uv-tool-install` | `8a7e104c864b57a10379130a568538e68c0aef93` |
+| cubrid-build-coordinator | `/home/vimkim/gh/cubrid-build-coordinator-uv-tool` | `fix/uv-tool-install` | `2735631453b83d89fb84a68fba1fcacc4ad15af7`, followed by the audit and completion records. |
 | docserve | `/home/vimkim/gh/docserve-uv-tool` | `fix/regular-uv-tools` | `13a2cd2503660b2bf0b7148936ae93709b4cc8fe` |
 | dotfiles | `/home/vimkim/.local/share/chezmoi-uv-tool` | `fix/regular-uv-tools` | `3a5e294` documents regular installs; `d00b3dd1f300fd6470181793f630a6211230869e` follows the rename. |
 
-## Pending integration and deployment
+## Integration and deployment results
 
-No live CLI refresh or dotfiles deployment occurred during verification.
-The following dotfiles targets were inspected and reviewed with task-source `chezmoi diff`:
+After the approved merges, each changed CLI was refreshed from its permanent main checkout.
+All declared commands ran outside the source checkout, and installed metadata confirmed regular installation.
+The unchanged TUI also passed the final live installation check.
+
+`chezmoi-apply-unmodified` ran once for all managed files and symlinks in the configured source checkout.
+It exited successfully with no skipped targets. All three affected target diffs were empty afterward:
 
 | Source | Absolute deployed target | Current state |
 | --- | --- | --- |
-| `private_dot_config/my-scripts/daily-update.toml` | `/home/vimkim/.config/my-scripts/daily-update.toml` | Old inventory identity remains until deployment. |
-| `private_dot_config/my-scripts/bin/executable_serve-html.py` | `/home/vimkim/.config/my-scripts/bin/serve-html.py` | Old retry path remains until deployment. |
-| `private_dot_config/my-scripts/share/symlink_serve-html.tmpl` | `/home/vimkim/.config/my-scripts/share/serve-html` | Existing symlink points to the absent old checkout; the new source points to docserve. |
+| `private_dot_config/my-scripts/daily-update.toml` | `/home/vimkim/.config/my-scripts/daily-update.toml` | Verified: inventory selects `~/gh/docserve` and `vimkim/docserve`. |
+| `private_dot_config/my-scripts/bin/executable_serve-html.py` | `/home/vimkim/.config/my-scripts/bin/serve-html.py` | Verified: retry path names the docserve checkout. |
+| `private_dot_config/my-scripts/share/symlink_serve-html.tmpl` | `/home/vimkim/.config/my-scripts/share/serve-html` | Verified: symlink resolves to the existing docserve assets. |
 
 The changed bootstrap is source-only for this helper deployment. The helper excludes run scripts.
 Its legacy filename, command aliases, and backup location remain compatible.
 No source checkout is unavailable after resolving the docserve rename.
 
-After approval, rebase and merge each task branch against its current clean destination.
-The global workflow requires pushing the five CLI repositories' main branches after their approved merges.
-Dotfiles synchronization and pushing require an explicit request under its repository policy.
-Run `chezmoi-apply-unmodified` once after the dotfiles merge, then verify all three affected targets and report any skips.
-Refresh the five changed CLI installations from their permanent checkouts if live refresh is approved.
-Use the coordinator's explicit one-time uv migration for its observed legacy link.
-Remove only this task's merged worktrees and branches after verification.
+Overall `chezmoi status` for managed files and symlinks was also empty after deployment.
+No helper failures, remaining target differences, or deployment skips remain.
+The installed coordinator now belongs to uv's tool environment rather than the source checkout's `.venv`.
 
-Task checkouts were clean after their implementation commits.
+All six destination checkouts are clean. Only this task's merged worktrees and branches are removed during completion, without force.
+The final coordinator audit commit, push, and cleanup are recorded in tracker 442 and the local integration evidence.
 Unrelated `cubrid-conf-tui/docs/incidents/` files were preserved in its permanent checkout.
-The pre-existing my-cubrid-skills main commit and unrelated worktrees were preserved.
-Disposable task `.venv` and build outputs remain ignored until normal worktree cleanup.
+The pre-existing my-cubrid-skills main commit and unrelated worktrees, including coordinator validation and Herdr design work, were preserved.
+Only disposable task environments, caches, and build outputs were discarded with the merged task worktrees.
